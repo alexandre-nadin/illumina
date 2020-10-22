@@ -4,10 +4,11 @@ _basedir=$(dirname $_dir)
 
 popPaths()
 {
-  printf "${PATH}\n"              \
-  | tr ':' '\n'                   \
+  printf "${PATH}"        \
+  | tr ':' '\n'           \
   | grep -v "${_basedir}" \
-  | tr '\n' ':' 
+  | tr '\n' ':'           \
+  | sed 's/:$//'
 }
 
 export PATH=$(popPaths)
