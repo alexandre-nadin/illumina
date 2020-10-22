@@ -440,7 +440,7 @@ setSampleSheets() {
   cat $SSHEET_RUN                                                  \
    | ssheet::projectFiltered ${FILTERED_PRJS:+${FILTERED_PRJS[@]}} \
    | ssheet::tagData                                               \
-   > $SSHEET_DEMUX
+   > $SSHEET_DEMUX && : || :
   
   ## Check final samplesheet has projects.
   SSHEET_PRJS=($(ssheet::projects < "$SSHEET_DEMUX"))
