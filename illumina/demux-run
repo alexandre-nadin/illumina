@@ -82,7 +82,7 @@ EOFMAN
 execFlow() {
   initParams
   parseParams "$@"
-  checkAuthorization
+#  checkAuthorization
   checkVariables
   setIlluminaRun
   checkDemuxDir
