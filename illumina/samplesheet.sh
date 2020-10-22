@@ -96,7 +96,7 @@ ssheet::addDataTags() {
   awk -F"$SSHEET_DELIMITER" \
     '{
         OFS=FS;
-        $'"$colSampleId"'= "'"${SSHEET_SAMPLE_TAG}"'" $'"$colSampleName"'; 
+        $'"$colSampleId"'= "'"${SSHEET_SAMPLE_TAG}"'" $'"$colSampleId"'; 
         $'"$colPrjName"'= "'"${SSHEET_PROJECT_TAG}"'" $'"$colPrjName"'; 
         print $0 
       }'                     \
@@ -109,7 +109,7 @@ ssheet::projectFiltered() {
   # Reads a sample sheet content and builds another one from it for the specified project.
   #
   local ssheet=$(cat /dev/stdin)
-  local prj="$1"
+  local prj="${1:+$1}"
   ssheet::metadata   <<< "$ssheet"
   ssheet::dataHeader <<< "$ssheet"
   ssheet::data       <<< "$ssheet" \
@@ -120,10 +120,10 @@ ssheet::filterProject() {
   #
   # Takes a samplesheet's data and filters the lines with the given project name.
   #
-  local prj="$1"
-  grep -- $(ssheet::projectRegex ${prj}) \
+  local prj="${1:+$1}"
+  grep -- $(ssheet::projectRegex "${prj}") \
    < /dev/stdin                        \
-    || log::printError "Could not find project '$prj' in samplesheet."
+    || log::printWarning "Could not find project '$prj' in samplesheet."
 }
 
 
@@ -158,13 +158,11 @@ ssheet::readLocal() {
   local ssheet="$1"
   [ -f "$ssheet" ] || return 1
   local ssheet="$ssheet"
-  log::printInfo "Reading local sample sheet '$ssheet'"
   cat "$ssheet"
 }
 
 ssheet::download() {
   local ssheet="$1"
-  log::printInfo "Downloading sample sheet:\n$(ssheet::downloadCmd $ssheet)"
   ssheet::downloadCmdExec "$ssheet"
 }
 
@@ -244,14 +242,11 @@ ssheet::dataColumnIndex() {
   # Returns the index of the column name.
   #
   local colNamePattern="$1"
-  cat /dev/stdin              \
-   | csv.get-col-names        \
-      -d "$SSHEET_DELIMITER" \
-      --output-delimiter '\n' \
-      --count                 \
-      --after-counter '\t'    \
-   | grep "$colNamePattern"   \
-   | awk -F'\t' '{print $1}'
+  cat /dev/stdin                     \
+   | ssheet::dataHeader              \
+   | tr ',' '\n'                     \
+   | grep -n '^'"$colNamePattern"'$' \
+   | cut -d: -f1
 }
 
 ssheet::projects() {
@@ -259,10 +254,7 @@ ssheet::projects() {
   # Takes a sample sheet and returns all projects found in it.
   #
   local ssheet="$(cat /dev/stdin)"
-  local colidx_prj=$(
-    ssheet::data <<< "$ssheet"    \
-     | ssheet::dataColumnIndex "$SSHEET_PROJECT_NAME_REGEX"
-  )
+  local colidx_prj=$(ssheet::dataColumnIndex "$SSHEET_PROJECT_NAME_REGEX" <<< "$ssheet")
   ssheet::dataSamples <<< "$ssheet" \
    | awk -F"$SSHEET_DELIMITER"     \
        '{print $'"$colidx_prj"'}'   \
