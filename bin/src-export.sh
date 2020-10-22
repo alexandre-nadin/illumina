@@ -10,7 +10,6 @@ exportSubmodules() {
   local binpath
   for submodule in ${SUBMODULES[@]}; do 
     binpath="${_basedir}/${submodule}/bin"
-    echo "Adding binpath: '$binpath'"
     [ -d "$binpath" ] && export PATH="${binpath}":$PATH || :
   done
 }
