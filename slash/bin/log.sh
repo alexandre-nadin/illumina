@@ -99,6 +99,16 @@ log::exitError() {
 # -----------------
 # Logging library
 # -----------------
+log::startLogging() {
+  #
+  # Initializes the logging in a file with the given :prefix: and :logdir:
+  # 
+  local prefix="${1:+$1}" logdir="${2:+$2}" withTime=${3:+true}
+  mkdir -p "${logdir:+$logdir}"
+  datetime::resetRunDatetime
+  log::setLogFile "${logdir:+$logdir/}${withTime:+$(datetime::runDatetimeFileFormat)}${prefix}"
+}
+
 log::setLogFile() {
   #
   # Sets the log file. Checks the directory.
