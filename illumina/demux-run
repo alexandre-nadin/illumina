@@ -1,0 +1,454 @@
+#!/usr/bin/env bash
+SCRIPT_PATH="$(readlink -f ${0})"
+SCRIPT_NAME="$(basename ${SCRIPT_PATH})"
+
+source log.sh
+source cosr.sh
+source samplesheet.sh
+source datetime.sh
+datetime::resetRunDatetime
+
+set -euf -o pipefail
+
+trim() {
+  #
+  # Trims the given variable
+  #
+  local var="$1"
+  var="${var#"${var%%[![:space:]]*}"}"
+  # remove trailing whitespace characters
+  var="${var%"${var##*[![:space:]]}"}"
+  printf "$var"   
+}
+
+man() {
+  cat << EOFMAN
+  
+  DESCRIPTION
+      Demultiplexes an Illumina run.
+      Will not override an existing demultiplexed project for security reasons.
+      Can demultiplex specific projects if specified.
+      Demux output will be automatically structurated by default as follow: 
+      <RUN_ID>/<Sample_Project>/<Sample_Name>/<Sample_Name>.fastq.gz"
+
+  USAGE
+      $ ${BASH_SOURCE[0]} [OPTIONS ...] RUN_ID
+
+  OPTIONS
+      -i|--illumina-dir PATH
+          The path to the Illumina folder. Default "$ILLUMINA_DIR". RUN_ID is found there using a maxdepth of $FIND_DEPTH.
+  
+      --demux-root-dir DEMUX_ROOT_DIR
+          The directory where the folder for RUN_ID will be created. Default is "$COSR_DEMUX_RAW_DIR".
+
+      --run-dir RUN_DIR
+          The directory name where the RUN_ID will be demultiplexed. By default it is RUN_ID. 
+          The output folder will be "DEMUX_ROOT_DIR/RUN_DIR"
+  
+      -s|--sample-sheet-iem FILE
+          The path to the IEM sample sheet. Accepts also a URL. Default "$COSR_SSHEET_DIR/<RUN_ID>_IEM.csv"
+  
+      --cellranger
+          Uses cellranger to demultiplex the run.
+ 
+      --cellranger-atac
+          Uses cellranger-atac to demultiplex the run.
+ 
+      --with-tags
+          Adds tags to the output structure as "<RUN_ID>/${SSHEET_PROJECT_TAG}<PROJECT>/${SSHEET_SAMPLE_TAG}<SAMPLE_NAME>.fastq.gz" instead of "<RUN_ID>/<Sample_Project>/<Sample_Name>/<Sample_Name>.fastq.gz".
+ 
+      -b|--bcl2fastq-options OPTION_STRING
+          String containing options to the bcl2fastq command.
+          Mandatory options "--runfolder-dir", "--output-dir", and "--sample-sheet" are ALREADY used by this script.
+  
+      -p|--project-name PROJECT [-p PROJECT ...]
+          The name of the project to filter from the sample sheet. Name is case sensitive.
+  
+      --force
+          Overwrites the output folder if it already exists.
+
+      -h|--help
+          Displays this help manual.
+  
+      -v|--verbose
+          Makes the script more verbose.
+    
+EOFMAN
+}
+
+# ----------------
+# Demultiplexing
+# ----------------
+execFlow() {
+  initParams
+  parseParams "$@"
+  checkAuthorization
+  checkVariables
+  setIlluminaRun
+  checkDemuxDir
+  log_start_logging "demultiplex" "$DEMUXED_RUN_DIR"
+  setSampleSheets
+  execDemux
+  cleanDemuxDir
+}
+
+execDemux() {
+  if demuxRun; then
+    log::printInfo "Run successfully demultiplexed in \"$DEMUXED_RUN_DIR\"."
+  else
+    log::exitError "Something went wrong with the demultiplexing. Check out the log '$(demuxLog $DEMUXED_RUN_DIR)'."
+  fi
+}
+
+demuxRun() {
+  #
+  # Do demultiplexing of the whole run.
+  #
+  cd "${DEMUXED_RUN_DIR}"
+  cmd="$(demuxCmd ${SSHEET_DEMUX})"
+  log::printInfo "[demux][$RUN_ID]${FILTERED_PRJS:+[${FILTERED_PRJS[@]}]}"
+  log::printInfo "  \$ $cmd"
+  eval "$cmd" 2>> $(demuxLog "${DEMUXED_RUN_DIR}")
+}
+
+demuxCmd() {
+  #
+  # Chooses which command to use for demuxing
+  #
+  if [ $USE_CELLRANGER = true ]; then
+    demuxCellrangerCmd $@
+  else
+    if [ $USE_CELLRANGER_ATAC = true ]; then
+      demuxCellrangerAtacCmd $@
+    else
+      demuxBcl2fastqCmd $@ 
+    fi
+  fi  
+}
+
+demuxCellrangerCmd() {
+  #
+  # Command string for Cellranger 
+  #
+  local demuxSsheet="$1"
+  cat << eol | xargs
+  cellranger $(demuxCellrangerOpts $1)
+eol
+}
+
+demuxCellrangerAtacCmd() {
+  #
+  # Command string for Cellranger 
+  #
+  cat << eol | xargs
+  cellranger-atac $(demuxCellrangerOpts $1)
+eol
+}
+
+demuxCellrangerOpts() {
+  local demuxSsheet="$1"
+  cat << eol
+  mkfastq
+    --samplesheet="$demuxSsheet"
+    --run="$ILLUMINA_RUN"
+    --output-dir="$DEMUXED_RUN_DIR"
+eol
+
+}
+
+demuxBcl2fastqCmd() {
+  #
+  # Command string for bccl2fastq
+  #
+  local demuxSsheet="$1"
+  cat << eol | xargs
+  bcl2fastq
+    $BCL2FASTQ_OPTS
+    --runfolder-dir="$ILLUMINA_RUN"
+    --output-dir="$DEMUXED_RUN_DIR"
+    --sample-sheet="$demuxSsheet"
+    --reports-dir="${DEMUXED_RUN_DIR}/Reports"
+    --stats-dir="${DEMUXED_RUN_DIR}/Stats"
+    --interop-dir="${DEMUXED_RUN_DIR}/InterOp"
+eol
+}
+
+demuxLog() {
+  printf "${1:+$1/}bcl2fastq.log"
+}
+
+cleanDemuxDir() {
+  #
+  # Cleans the demuxed dir after succcessful demultipexing.
+  #
+  removeUndetermined
+  removeFoldersTags
+  removeReportsTags
+}
+
+removeUndetermined() {
+  log::printInfo "Removing all undetermined reads."
+  find ${DEMUXED_RUN_DIR} -name 'Undetermined*.gz' | xargs rm -f
+}
+
+removeFoldersTags() {
+  removeFoldersTag "$SSHEET_SAMPLE_TAG"
+  removeFoldersTag "$SSHEET_PROJECT_TAG"
+}
+
+removeFoldersTag() {
+  #
+  # Removes the given tag to each demuxed folder.
+  #
+  local tag files dname bname
+  tag="$1"
+  if [ "${#tag}" -eq 0 ]; then
+    return
+  else
+    :
+  fi
+  files=($(find ${DEMUXED_RUN_DIR} -type d -name "${tag}*"))
+
+  ## Rename tagged files
+  if [ ${#files[@]} -ge 1 ]; then
+    for file in "${files[@]}"; do
+      dname=$(dirname $file)
+      bname=$(basename $file)
+      mv "$file" "${dname}/${bname##${tag}}"
+    done
+  else
+    :
+  fi
+}
+
+removeReportsTags() {
+  removeReportsTag "$SSHEET_PROJECT_TAG"
+  removeReportsTag "$SSHEET_SAMPLE_TAG"
+}
+
+removeReportsTag() {
+  #
+  # Removes :tag: tagged contents from the Reports folder
+  #
+  local tag="$1" reports="${DEMUXED_RUN_DIR}/Reports/" 
+  if [ -d "$reports" ]; then
+    grep -Rn "$tag" "$reports" \
+      | cut -d: -f1 \
+      | sort | uniq \
+      | xargs sed -i "s|$tag||g" \
+     || :
+  else
+    echo "Warning: Demultiplexig did not produce reports." >&2
+  fi
+}
+
+# ------------
+# Parameters
+# ------------
+initParams() {
+  #
+  # Define default variables
+  #
+  ILLUMINA_DIR="$COSR_ILLUMINA_DIR"
+  DEMUX_ROOT_DIR="$COSR_DEMUX_RAW_DIR"
+  DEMUXED_RUN_DIR=""
+  FIND_DEPTH=2
+  FILTERED_PRJS=()
+  BCL2FASTQ_OPTS=""
+  USE_CELLRANGER=false
+  USE_CELLRANGER_ATAC=false
+  FORCE_DEMUX=false
+}
+
+parseParams() {
+  # 
+  # Parses parameters
+  # 
+  while [ $# -ge 1 ]
+  do
+    case "$1" in
+      --debug)
+        DBG=1
+        VERBOSE=1
+      ;;
+  
+      -h|--help)
+        man && exit
+      ;;
+  
+      -v|--verbose)
+        VERBOSE=1
+      ;;
+  
+      --force)
+        FORCE_DEMUX=true
+      ;;
+  
+      -i|--illumina-dir)
+        ILLUMINA_DIR="$2" && shift
+      ;;
+  
+      -p|--project-name)
+        FILTERED_PRJS+=("$2") && shift
+      ;;
+  
+      --demux-root-dir)
+        DEMUX_ROOT_DIR="${2:+$(readlink -f $2)}"
+        shift
+      ;;
+  
+      --run-dir)
+        RUN_DIR=$(basename "$2") && shift
+      ;;
+  
+      -s|--sample-sheet-iem)
+        SSHEET_IN="${2:+$(readlink -f $2)}" && shift
+      ;;
+  
+      --cellranger)
+        USE_CELLRANGER=true
+      ;;
+   
+      --cellranger-atac)
+        USE_CELLRANGER_ATAC=true
+      ;;
+ 
+      --with-tags)
+        SSHEET_WITH_TAGS=true
+      ;;
+  	
+      -b|--bcl2fastq-options)
+        BCL2FASTQ_OPTS="$2" && shift
+      ;;
+  
+      -*)
+        log::exitError "Unexpected option \"$1\". Please use --help for more information."
+      ;;
+  
+      *)
+        if [ ! -z "${RUN_ID:+x}" ]; then
+          log::exitError "You can demultiplex only 1 RUN_ID at a time. Please choose between '$RUN_ID' and '$1'."
+        else
+          RUN_ID=$(trim "$1")
+        fi
+      ;;
+  
+    esac
+    shift
+  done
+}
+
+checkAuthorization() {
+  #
+  # Executes inside a node.
+  #
+  pbs.is-node || log::exitError "Please use this command in a node."
+}
+
+# -----------------
+# Check variables
+# -----------------
+checkVariables() {
+  if [ -z "${ILLUMINA_DIR:+x}" ] || [ ! -d "$ILLUMINA_DIR" ]
+  then
+    log::exitError "Illumina folder \"$ILLUMINA_DIR\" is not a directory."
+  else:
+    :
+  fi
+
+  ## Check RUN_ID
+  if [ -z "${RUN_ID:+x}" ]; then
+    log::exitError "Missing or empty RUN_ID."
+  fi
+  
+  DEMUXED_RUN_DIR="${DEMUX_ROOT_DIR:+${DEMUX_ROOT_DIR}/}${RUN_DIR:-${RUN_ID}}"
+}
+
+# -------------------
+# Check/Update RUN
+# -------------------
+setIlluminaRun() {
+  ## Find RUN_ID in ILLUMINA_DIR
+  local runs=($(find "$ILLUMINA_DIR" -maxdepth $FIND_DEPTH -name "$RUN_ID" -type d))
+  [ ${#runs[@]} -eq 0 ] && log::exitError "Can't find run \"$RUN_ID\" in illumina dir \"$ILLUMINA_DIR\""
+  [ ${#runs[@]} -gt 1 ] && log::exitError "Found run \"$RUN_ID\" ${#runs[@]} time(s) in \"$ILLUMINA_DIR\". Only one is needed. Please be more explicit with the option --illumina-dir."
+  log::printInfo "INFO: Found run in '${runs[0]}'."
+  ILLUMINA_RUN=$(readlink -f ${runs[0]})
+}
+
+checkDemuxDir() {
+  #
+  # Deals with creation and overwriting of demux dir
+  # 
+  setDemuxedDir
+  overwriteDemuxDir
+  mkDemuxDir
+}
+
+setDemuxedDir() {
+  DEMUXED_RUN_DIR="${DEMUXED_RUN_DIR:-${COSR_DEMUX_RAW_DIR}/${RUN_ID}}"
+}
+
+overwriteDemuxDir() {
+  canOverwriteDemuxDir              \
+    && rm -rf "${DEMUXED_RUN_DIR}/" \
+    || :
+}
+
+canOverwriteDemuxDir() {
+  #
+  # Decides if demuxed dir DEMUXED_RUN_DIR can be overwritten.
+  # It has to be forced and not flagged as unremovable.
+  # An non-existant dir is viewed as overwritable.
+  #
+  if [ -d "$DEMUXED_RUN_DIR" ]; then
+    if $FORCE_DEMUX; then
+      if [ -f "${DEMUXED_RUN_DIR}/${COSR_UNREMOVABLE_FLAG}" ]; then
+        log::exitError "The run folder '$DEMUXED_RUN_DIR' is flagged as unremovable: it cannot be overwritten and demultiplexing will not be performed there." 
+      else
+        :
+      fi
+    else
+      log::exitError "The run folder $DEMUXED_RUN_DIR already exists. Use the --force option to overwrite it."
+    fi
+  else
+    :
+  fi
+  return 0
+}
+
+mkDemuxDir() {
+  mkdir -p "${DEMUXED_RUN_DIR}" \
+   || log::exitError "Could not create demux folder '$DEMUXED_RUN_DIR'"
+}
+
+
+# ---------------
+# Sample Sheets
+# ---------------
+setSampleSheets() {
+  ## Check input default sample sheet
+  SSHEET_IN=${SSHEET_IN:-${COSR_SSHEET_DIR}/${RUN_ID}_IEM.csv}
+  [ -f "$SSHEET_IN" ] || log::exitError "Samplesheet '$SSHEET_IN' not found."
+  SSHEET_RUN="${DEMUXED_RUN_DIR}/${SSHEET_FILENAME}"
+  SSHEET_DEMUX="${DEMUXED_RUN_DIR}/${SSHEET_FILENAME}.demux"
+  
+  ## Original Samplesheet
+  ssheet::build "$SSHEET_IN" > "$SSHEET_RUN"
+  
+  ## Filter and tag samplesheet
+  cat $SSHEET_RUN                                                  \
+   | ssheet::projectFiltered ${FILTERED_PRJS:+${FILTERED_PRJS[@]}} \
+   | ssheet::tagData                                               \
+   > $SSHEET_DEMUX
+  
+  ## Check final samplesheet has projects.
+  SSHEET_PRJS=($(ssheet::projects < "$SSHEET_DEMUX"))
+  [ ${#SSHEET_PRJS[@]} -gt 0 ] || log::exitError "No projects found in final samplesheet '$SSHEET_DEMUX'." 
+  
+  log::printInfo "Created formatted samplesheet: '$SSHEET_RUN'."
+  log::printInfo "Created tagged samplesheet: '$SSHEET_DEMUX'."
+}
+
+# -----
+execFlow "$@"
