@@ -86,7 +86,7 @@ execFlow() {
   checkVariables
   setIlluminaRun
   checkDemuxDir
-  log_start_logging "demultiplex" "$DEMUXED_RUN_DIR"
+  log::startLogging "demultiplex" "$DEMUXED_RUN_DIR"
   setSampleSheets
   execDemux
   cleanDemuxDir
