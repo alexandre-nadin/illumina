@@ -1,5 +1,15 @@
 #!/usr/bin/env bash
 
+#
+# Checks if the user is currently in a computational node.
+# If there is no job scheduler, considers login and computational nodes are the same.
+#
+hasJobScheduler()
+{
+  type pbsnodes 2> /dev/null \
+  || type sinfo 2> /dev/null
+}
+
 isSlurmNode() 
 {
   [ ! -z ${SLURM_JOB_NODELIST} ]
@@ -10,4 +20,4 @@ isPBSNode()
   [ ! -z ${PBS_JOBID:+x} ]
 }
 
-isSlurmNode || isPBSNode
+! hasJobScheduler || isSlurmNode || isPBSNode
