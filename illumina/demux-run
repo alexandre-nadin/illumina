@@ -82,7 +82,7 @@ EOFMAN
 execFlow() {
   initParams
   parseParams "$@"
-#  checkAuthorization
+  checkAuthorization
   checkVariables
   setIlluminaRun
   checkDemuxDir
@@ -342,7 +342,7 @@ checkAuthorization() {
   #
   # Executes inside a node.
   #
-  pbs.is-node || log::exitError "Please use this command in a node."
+  cluster-is-node || log::exitError "Please use this command in a node."
 }
 
 # -----------------
