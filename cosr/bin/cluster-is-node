@@ -6,8 +6,8 @@
 #
 hasJobScheduler()
 {
-  type pbsnodes 2> /dev/null \
-  || type sinfo 2> /dev/null
+  type pbsnodes &> /dev/null \
+  || type sinfo &> /dev/null
 }
 
 isSlurmNode() 
