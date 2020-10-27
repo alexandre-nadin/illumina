@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+
+isSlurmNode() 
+{
+  [ ! -z ${SLURM_JOB_NODELIST} ]
+}
+
+isPBSNode()
+{
+  [ ! -z ${PBS_JOBID:+x} ]
+}
+
+isSlurmNode || isPBSNode
