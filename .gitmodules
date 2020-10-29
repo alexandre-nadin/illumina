@@ -1,0 +1,3 @@
+[submodule "cosr"]
+	path = cosr
+	url = git@bitbucket.org:cosrhsr/cosr-nx.git
