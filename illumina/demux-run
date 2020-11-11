@@ -108,7 +108,7 @@ demuxRun() {
   cmd="$(demuxCmd ${SSHEET_DEMUX})"
   log::printInfo "[demux][$RUN_ID]${FILTERED_PRJS:+[${FILTERED_PRJS[@]}]}"
   log::printInfo "  \$ $cmd"
-  eval "$cmd" 2&>1 | tee $(demuxOutputLog "${DEMUXED_RUN_DIR}")
+  eval "$cmd" 2>&1 | tee $(demuxOutputLog "${DEMUXED_RUN_DIR}")
 }
 
 demuxCmd() {
