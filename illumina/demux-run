@@ -86,7 +86,7 @@ execFlow() {
   checkVariables
   setIlluminaRun
   checkDemuxDir
-  log::startLogging "demultiplex" "$DEMUXED_RUN_DIR"
+  log::startLogging "demux" "$DEMUXED_RUN_DIR"
   setSampleSheets
   execDemux
   cleanDemuxDir
@@ -96,7 +96,7 @@ execDemux() {
   if demuxRun; then
     log::printInfo "Run successfully demultiplexed in \"$DEMUXED_RUN_DIR\"."
   else
-    log::exitError "Something went wrong with the demultiplexing. Check out the log '$(demuxLog $DEMUXED_RUN_DIR)'."
+    log::exitError "Something went wrong with the demultiplexing. Check out the log '$(demuxOutputLog $DEMUXED_RUN_DIR)'."
   fi
 }
 
@@ -108,7 +108,7 @@ demuxRun() {
   cmd="$(demuxCmd ${SSHEET_DEMUX})"
   log::printInfo "[demux][$RUN_ID]${FILTERED_PRJS:+[${FILTERED_PRJS[@]}]}"
   log::printInfo "  \$ $cmd"
-  eval "$cmd" 2>> $(demuxLog "${DEMUXED_RUN_DIR}")
+  eval "$cmd" 2&>1 | tee $(demuxOutputLog "${DEMUXED_RUN_DIR}")
 }
 
 demuxCmd() {
@@ -174,8 +174,8 @@ demuxBcl2fastqCmd() {
 eol
 }
 
-demuxLog() {
-  printf "${1:+$1/}bcl2fastq.log"
+demuxOutputLog() {
+  printf "${1:+$1/}demux.out"
 }
 
 cleanDemuxDir() {
