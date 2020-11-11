@@ -57,8 +57,8 @@ man() {
       --with-tags
           Adds tags to the output structure as "<RUN_ID>/${SSHEET_PROJECT_TAG}<PROJECT>/${SSHEET_SAMPLE_TAG}<SAMPLE_NAME>.fastq.gz" instead of "<RUN_ID>/<Sample_Project>/<Sample_Name>/<Sample_Name>.fastq.gz".
  
-      -b|--bcl2fastq-options OPTION_STRING
-          String containing options to the bcl2fastq command.
+      --demuxer-opts "OPTION [OPTION ...]"
+          String containing options for the demultiplexer command (bcl2fastq, cellranger or cellranger-atac).
           Mandatory options "--runfolder-dir", "--output-dir", and "--sample-sheet" are ALREADY used by this script.
   
       -p|--project-name PROJECT [-p PROJECT ...]
@@ -152,6 +152,7 @@ demuxCellrangerOpts() {
     --samplesheet="$demuxSsheet"
     --run="$ILLUMINA_RUN"
     --output-dir="$DEMUXED_RUN_DIR"
+    $DEMUXER_OPTS
 eol
 
 }
@@ -163,13 +164,13 @@ demuxBcl2fastqCmd() {
   local demuxSsheet="$1"
   cat << eol | xargs
   bcl2fastq
-    $BCL2FASTQ_OPTS
     --runfolder-dir="$ILLUMINA_RUN"
     --output-dir="$DEMUXED_RUN_DIR"
     --sample-sheet="$demuxSsheet"
     --reports-dir="${DEMUXED_RUN_DIR}/Reports"
     --stats-dir="${DEMUXED_RUN_DIR}/Stats"
     --interop-dir="${DEMUXED_RUN_DIR}/InterOp"
+    $DEMUXER_OPTS
 eol
 }
 
@@ -254,7 +255,7 @@ initParams() {
   DEMUXED_RUN_DIR=""
   FIND_DEPTH=2
   FILTERED_PRJS=()
-  BCL2FASTQ_OPTS=""
+  DEMUXER_OPTS=""
   USE_CELLRANGER=false
   USE_CELLRANGER_ATAC=false
   FORCE_DEMUX=false
@@ -317,8 +318,8 @@ parseParams() {
         SSHEET_WITH_TAGS=true
       ;;
   	
-      -b|--bcl2fastq-options)
-        BCL2FASTQ_OPTS="$2" && shift
+      --demuxer-opts)
+        DEMUXER_OPTS="$2" && shift
       ;;
   
       -*)
